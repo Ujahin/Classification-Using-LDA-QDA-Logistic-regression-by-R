@@ -1,0 +1,186 @@
+---
+title: "Assignment - 02"
+author: "Umme Atiqua Jahin"
+date: "2025-09-28"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+## Introduction
+ This report implements and compares three classical classification methods — Linear Discriminant Analysis
+ (LDA), Quadratic Discriminant Analysis (QDA), and Logistic Regression — to predict malignancy in the
+ Breast Cancer Wisconsin (Diagnostic) dataset. We perform exploratory data analysis (EDA), preprocessing,
+ model fitting, evaluation (accuracy, precision, recall, F1), and discuss trade-offs and results.
+ 
+ 
+##  Data Preprocessing
+
+Loading Necessary library
+```{r, echo=TRUE, message=FALSE, warning=FALSE, results='hide'}
+library(tidyverse)
+library(dplyr) 
+library(MASS)
+library(mlbench)
+```
+Loading Dataset
+```{r}
+data("BreastCancer")
+head(BreastCancer)
+```
+Structure of Dataset and summary statistics
+```{r}
+names(BreastCancer)
+dim(BreastCancer)
+str(BreastCancer)
+summary(BreastCancer)
+```
+
+To apply LDA and QDA, all predictors need to be numeric. However, in the BreastCancer dataset, the
+ predictors are stored as ordered or factor variables. For this assignment, we will treat all predictors as numeric
+ variables. Additionally, we will remove the Id variable since it does not provide any useful information.
+```{r}
+bc <- BreastCancer[, -1]
+bc <- bc %>%
+  mutate(across(-Class, ~ as.numeric(as.character(.))))
+glimpse(bc)
+```
+## Exploratory Data Analysis
+```{r}
+# Loop over each variable in bc except 'Class'
+for (var in names(bc)[names(bc) != "Class"]) {
+  # Create a table of counts for the current variable
+  counts <- table(bc[[var]])
+  
+  # Plot bar chart 
+  barplot(counts,
+          main = paste("Bar Chart of", var),
+          xlab = var,
+          ylab = "Frequency",
+          col = "skyblue",
+          border = "black")
+}
+```
+
+
+
+
+### Missing value check 
+```{r}
+# Count missing values in each column
+colSums(is.na(bc))
+```
+
+ Only the variable Bare.nuclei has missing values so imputation done by mean
+```{r}
+bc$Bare.nuclei[is.na(bc$Bare.nuclei)]<-mean(bc$Bare.nuclei,na.rm=TRUE)
+```
+## Split The Dataset 
+```{r}
+# Set seed and split
+set.seed(123)
+n <- nrow(bc)
+train_indices <- sample(seq_len(n), size = 0.7 * n)
+train_data <- bc[train_indices, ]
+test_data  <- bc[-train_indices, ]
+
+# Separate features and target
+X_train <- train_data[, setdiff(names(train_data), "Class")]
+y_train <- train_data$Class
+
+X_test <- test_data[, setdiff(names(test_data), "Class")]
+y_test <- test_data$Class
+```
+## Standardize features
+```{r}
+# Standardize features
+X_train_scaled <- as.data.frame(scale(X_train))
+X_test_scaled <- as.data.frame(scale(X_test,
+                                     center = attr(scale(X_train), "scaled:center"),
+                                     scale  = attr(scale(X_train), "scaled:scale")))
+
+# Recombine with Class
+train_data_std <- cbind(X_train_scaled, Class = y_train)
+test_data_std  <- cbind(X_test_scaled,  Class = y_test)
+```
+## Linear Discriminant Analysis (LDA):
+```{r}
+lda_model <- lda(Class ~ ., data = train_data_std)
+lda_model
+lda_pred <- predict(lda_model, test_data_std)$class
+
+lda_cm <- table(Predicted = lda_pred, Actual = test_data_std$Class)
+print(lda_cm)
+```
+## Quadratic Discriminant Analysis (QDA):
+```{r}
+qda_model <- qda(Class ~ ., data = train_data_std)
+qda_model
+qda_pred <- predict(qda_model, test_data_std)$class
+
+qda_cm <- table(Predicted = qda_pred, Actual = test_data_std$Class)
+print(qda_cm)
+```
+
+## Logistic Regression
+
+```{r}
+log_model <- glm(Class ~ ., data = train_data_std, family = binomial)
+log_model
+log_probs <- predict(log_model, newdata = test_data_std, type = "response")
+# Convert probs to class labels (adjust threshold as needed)
+log_pred <- ifelse(log_probs >= 0.5, levels(y_train)[2], levels(y_train)[1])
+log_pred <- factor(log_pred, levels = levels(y_train))
+log_cm <- table(Predicted = log_pred, Actual = test_data_std$Class)
+print(log_cm)
+
+```
+### Defining a function for model evaluation
+```{r}
+evaluate_model <- function(predicted, actual) {
+  cm <- table(Predicted = predicted, Actual = actual)
+  
+  accuracy <- sum(diag(cm)) / sum(cm)
+  precision <- diag(cm) / rowSums(cm)
+  recall <- diag(cm) / colSums(cm)
+  f1 <- 2 * (precision * recall) / (precision + recall)
+  
+  
+  # Macro-averaged metrics: average across classes
+  macro_precision <- mean(precision)
+  macro_recall <- mean(recall)
+  macro_f1 <- mean(f1)
+  
+  # Return as named vector or data frame
+  return(c(
+    Accuracy = round(accuracy, 4),
+    Precision = round(macro_precision, 4),
+    Recall = round(macro_recall, 4),
+    F1_Score = round(macro_f1, 4)
+  ))
+}
+```
+# Model Evaluation
+```{r}
+lda_results <- evaluate_model(lda_pred, test_data_std$Class)
+lda_results
+qda_results <- evaluate_model(qda_pred, test_data_std$Class)
+qda_results 
+log_results <- evaluate_model(log_pred, test_data_std$Class)
+log_results
+```
+# Model Comparison
+
+```{r}
+comparison_table <- rbind(
+  LDA = lda_results,
+  QDA = qda_results,
+  Logistic = log_results
+)
+
+print(comparison_table)
+```
+Logistic Regression achieves the highest accuracy (0.9619), followed by LDA (0.9571) and QDA (0.9333). In terms of precision, Logistic Regression again leads (0.9463), indicating it produces fewer false positives compared to LDA (0.9456) and QDA (0.9061). Recall is highest for Logistic Regression (0.9633), meaning it correctly identifies most positive cases, while QDA also has a high recall (0.9483) but lower precision. The F1-Score, which balances precision and recall, is slightly higher for Logistic Regression (0.9542) compared to LDA (0.9478) and QDA (0.9227).
+
+#### Best Performing Algorithm
+Logistic Regression demonstrates the best overall balance between precision and recall, resulting in the highest F1-score and making it the most reliable model for overall classification performance. LDA performs similarly to Logistic Regression, with only slightly lower recall and F1-score, and remains a strong option when the normality assumption approximately holds. QDA shows very high recall, indicating it effectively identifies positive cases, but its lower precision leads to more false positives. Its assumption of different covariance structures for each class may not perfectly match this dataset, slightly reducing its overall accuracy.
